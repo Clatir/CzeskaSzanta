@@ -217,12 +217,21 @@ def EnsureDirExists(dirName):
 
 
 def SelectFile (dataFolderPath="NetworkData"):
-
+    
+    EnsureDirExists("NetworkData")
     filenames = next(os.walk(dataFolderPath), (None, None, []))[2]  
     
-    subprocess.run(['clear'])
+    if len(filenames) == 0:
+        print("Kolego, w folderze NetworkData nic nie ma. Lepiej prędko wrzuć tu jakiś plik .pcap \n")
+        GoToMainMenu()
+
+
     
-    print("Dostępne pliki")
+    subprocess.run(['clear'])
+
+
+    
+    print(f"Dostępne pliki: ")
     fileNumber=1
     for i in filenames:
         if (i.endswith(".pcap")):
