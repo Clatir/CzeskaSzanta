@@ -136,10 +136,7 @@ def ExtractData(selectedFile):
         inputdir = "NetworkData"
         dirName= selectedFile+"_ExtractedFiles"
 
-        if(os.path.isdir(dirName)) == True:
-            pass
-        else:
-            os.mkdir(dirName)
+        EnsureDirExists(dirName)
 
         ExtractFTP(pathToFile,dirName)
         ExtractHTTP(pathToFile,dirName)
@@ -193,7 +190,7 @@ def LiveAquisitionMenu():
     liveCaptureOption=input("Wybierz tryb akwizycji danych \n" \
     "1. Tryb prosty \n" \
     "2. Tryb zaawansowany \n" \
-    "Wybór opcji z poza zakresu spowoduje przejście do menu głównego")
+    "Wybór opcji z poza zakresu spowoduje przejście do menu głównego\n ")
     match liveCaptureOption:
         case "1":
             SimpleLiveCapture()
@@ -209,6 +206,13 @@ def MOTD():
     print("Ogonopowieść można również stworzyć w notatniku")
     GoToMainMenu()
 
+
+def EnsureDirExists(dirName):
+
+    if(os.path.isdir(dirName)) == True:
+        pass
+    else:
+        os.mkdir(dirName)
 
 
 
@@ -248,7 +252,7 @@ def SimpleLiveCapture():
 
             customCaptureTime = input("Podaj w sekundach przez jaki czas rejestrować ruch sieciowy.\n" \
                                     
-            "W przypadku braku podania czasu zostanie zastosowana nazwa domyślna [120s]\n") 
+            "W przypadku braku podania czasu program będzie przechwytywał ruch przez 120s\n") 
 
             if customFilename=="":
                 fileName=defaultFilename
@@ -262,11 +266,18 @@ def SimpleLiveCapture():
             else:
                 captureTime=int(customCaptureTime)
 
+
+            EnsureDirExists("NetworkData")
+
+            fileName = f"NetworkData/{fileName}"
+
             output = open(fileName, "w")
             
             capture = pyshark.LiveCapture(interface="enp0s3", output_file=fileName)
             capture.sniff(timeout=captureTime)
             output.close()
+
+            GoToMainMenu()
 
 
 def AdvancedLiveCapture():
@@ -361,6 +372,12 @@ def AdvancedLiveCapture():
                    validateChecksums="y"
 
 
+            
+            EnsureDirExists("NetworkData")
+
+            
+
+
 
 
         
@@ -376,6 +393,11 @@ def AdvancedLiveCapture():
             
             else:
                  subprocess.run([f"timeout", f"{captureTime}", "tcpdump", f"-Q{directionToListen}",f"-w {fileName}","--dont-verify-checksums",f"-i{"any"}"])
+            
+            print(f"Zapisalem plik pod nazwa {os.path.abspath(fileName)}")
+            os.replace(f"{fileName}",f"NetworkData/{fileName}")
+
+            GoToMainMenu
             
 
 
