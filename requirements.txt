@@ -1,0 +1,5 @@
+paramiko
+scapy
+requests
+pyshark
+geoip2
