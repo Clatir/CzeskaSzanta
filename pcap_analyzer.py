@@ -1,8 +1,6 @@
-from itertools import count
 import os
 import platform
 import time
-from unittest import result
 
 class ForensicApp:
     def __init__(self):
@@ -424,7 +422,7 @@ class ForensicApp:
             input("Enter...")
             return
 
-        extracted_dir = None
+        extracted_dir = "output/extracted_files"
 
         result = generate_final_report(self.report_data, base_output_dir="reports", extracted_dir=extracted_dir)
 
@@ -443,6 +441,9 @@ class ForensicApp:
             print("ZIP :", z.get("zip"))
             if z.get("warning"):
                 print("[!]", z["warning"])
+
+        import shutil
+        shutil.rmtree(extracted_dir)
 
         input("\nEnter...")
 
