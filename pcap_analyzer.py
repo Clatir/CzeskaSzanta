@@ -36,7 +36,7 @@ class ForensicApp:
             print("[11] Wykrywanie anomalii")
             print("")
             print("RAPORT:")
-            print("[13] Raport końcowy (JSON/HTML/AES)")
+            print("[12] Raport końcowy (JSON/HTML/AES)")
             print("")
             print("[0] Wyjście")
 

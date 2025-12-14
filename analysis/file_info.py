@@ -34,6 +34,8 @@ def get_file_info(path: str):
     except Exception:
         pass
 
+    capture.close()
+
     return {
         "success": True,
         "file": path,

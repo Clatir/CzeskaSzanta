@@ -2,7 +2,12 @@ import pyshark
 import ipaddress
 import geoip2.database
 
-def analyze_ips(path: str, geoip_db_path="GeoLite2-Country.mmdb"):
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+GEOIP_DB = BASE_DIR / "GeoLite2-Country.mmdb"
+
+def analyze_ips(path: str):
     try:
         capture = pyshark.FileCapture(path, keep_packets=False)
     except Exception as e:
@@ -14,7 +19,7 @@ def analyze_ips(path: str, geoip_db_path="GeoLite2-Country.mmdb"):
     public_ips = set()
     country_stats = {}
 
-    reader = geoip2.database.Reader(geoip_db_path)
+    reader = geoip2.database.Reader(GEOIP_DB)
 
     try:
         for pkt in capture:
@@ -41,6 +46,8 @@ def analyze_ips(path: str, geoip_db_path="GeoLite2-Country.mmdb"):
 
     except Exception:
         pass
+
+    capture.close()
 
     return {
         "success": True,

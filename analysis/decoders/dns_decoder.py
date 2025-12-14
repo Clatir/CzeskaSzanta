@@ -29,6 +29,8 @@ def decode_dns(pcap_path):
     except:
         pass
 
+    capture.close()
+
     return {
         "success": True,
         "entries": dns_entries,

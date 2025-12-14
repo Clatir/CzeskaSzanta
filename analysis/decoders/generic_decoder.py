@@ -1,6 +1,6 @@
-from analysis.l7.http_decoder import decode_http
-from analysis.l7.dns_decoder import decode_dns
-from analysis.l7.tls_decoder import decode_tls
+from analysis.decoders.http_decoder import decode_http
+from analysis.decoders.dns_decoder import decode_dns
+from analysis.decoders.tls_decoder import decode_tls
 
 SUPPORTED_PROTOCOLS = {
     "HTTP": decode_http,

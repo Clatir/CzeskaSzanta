@@ -65,6 +65,8 @@ def decode_http(pcap_path):
     except Exception:
         pass
 
+    capture.close()
+
     extracted_paths = extract_http_files(pcap_path)
 
     extracted_info = []

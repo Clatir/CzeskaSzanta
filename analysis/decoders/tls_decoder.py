@@ -29,6 +29,8 @@ def decode_tls(pcap_path):
     except:
         pass
 
+    capture.close()
+
     return {
         "success": True,
         "entries": tls_entries,
