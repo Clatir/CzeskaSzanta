@@ -2,6 +2,7 @@ from itertools import count
 import os
 import platform
 import time
+from unittest import result
 
 class ForensicApp:
     def __init__(self):
@@ -34,8 +35,7 @@ class ForensicApp:
             print("[10] Ekstrakcja danych L7")
             print("[11] Wykrywanie anomalii")
             print("")
-            print("ZABEZPIECZENIE:")
-            print("[12] Maskowanie danych")
+            print("RAPORT:")
             print("[13] Raport końcowy (JSON/HTML/AES)")
             print("")
             print("[0] Wyjście")
@@ -66,8 +66,6 @@ class ForensicApp:
                 case "11":
                     self.detect_anomalies()
                 case "12":
-                    self.mask_data()
-                case "13":
                     self.generate_report()
                 case "0":
                     self.clear()
@@ -322,6 +320,7 @@ class ForensicApp:
 
     def show_sessions(self):
         from analysis.session_manager import compute_sessions
+        from analysis.session_protocol_binder import bind_sessions_to_protocols
 
         self.clear()
         print("=== Sesje TCP/UDP (IN/OUT) ===\n")
@@ -333,10 +332,14 @@ class ForensicApp:
         
         file_path = self.report_data["metadata"]["file_path"]
         result = compute_sessions(file_path)
+
         if not result["success"]:
             print("[!]", result["message"])
             input("Enter...")
             return
+        
+        if "protocols" in self.report_data:
+            result = bind_sessions_to_protocols(result, self.report_data["protocols"])
         
         self.report_data["sessions"] = result
 
@@ -363,7 +366,7 @@ class ForensicApp:
             return
         
         filepath = self.report_data["metadata"]["file_path"]
-        present_protocols = self.report_data.get("protocols", {}).get("protocols", [])
+        present_protocols = self.report_data.get("protocols", {}).get("detected", [])
 
         result = decode_all_l7(filepath, present_protocols)
 
@@ -410,17 +413,38 @@ class ForensicApp:
                 print(f"   → {a['details']}\n")
         input("Enter...")
 
-    def mask_data(self):
-        self.clear()
-        print("=== Maskowanie danych ===")
-        print("(do implementacji)")
-        input("Enter...")
-
     def generate_report(self):
+        from reporting.report_generator import generate_final_report
+
         self.clear()
-        print("=== Generowanie raportu ===")
-        print("(do implementacji)")
-        input("Enter...")
+        print("=== Generowanie raportu końcowego ===\n")
+
+        if not self.report_data:
+            print("[!] Brak danych w report_data. Najpierw wykonaj analizę (file info / protocols / sessions / ip / anomalies).")
+            input("Enter...")
+            return
+
+        extracted_dir = None
+
+        result = generate_final_report(self.report_data, base_output_dir="reports", extracted_dir=extracted_dir)
+
+        if not result["success"]:
+            print("[!]", result["message"])
+            input("Enter...")
+            return
+
+        print("[✓]", result["message"])
+        print("Katalog:", result["output_dir"])
+        print("JSON:", result["json"])
+        print("PDF :", result["pdf"])
+
+        if result.get("zip"):
+            z = result["zip"]
+            print("ZIP :", z.get("zip"))
+            if z.get("warning"):
+                print("[!]", z["warning"])
+
+        input("\nEnter...")
 
 
 if __name__ == "__main__":

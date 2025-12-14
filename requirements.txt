@@ -3,3 +3,5 @@ scapy
 requests
 pyshark
 geoip2
+reportlab
+pyzipper
