@@ -49,7 +49,7 @@ def _zip_folder_with_password(src_dir, zip_path, password):
         }
 
 
-def _pdf_report(report_data, pdf_path, password):
+def _pdf_report(report_data, pdf_path, password, responsible_person):
     enc = pdfencrypt.StandardEncryption(
         userPassword=password,
         ownerPassword=password,
@@ -76,7 +76,9 @@ def _pdf_report(report_data, pdf_path, password):
 
     y = h - 35 * mm
     header("PCAP Forensic Analyzer — Raport końcowy")
-
+    header("Osoba odpowiedzialna za raport: " + responsible_person)
+    header("Data wygenerowania: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    
     meta = report_data.get("file_info", {})
     kv(y, "Plik:", meta.get("file", "N/A")); y -= 6 * mm
     kv(y, "SHA256:", meta.get("hash", "N/A")); y -= 6 * mm
@@ -124,12 +126,16 @@ def generate_final_report(report_data, base_output_dir="reports", extracted_dir=
     password = getpass("Podaj hasło do PDF/ZIP: ").strip()
     if not password:
         return {"success": False, "message": "Hasło nie może być puste."}
+    
+    responsible_person = input("Podaj osobę odpowiedzialną za raport: ")
+    if not responsible_person:
+        return {"success": False, "message": "Osoba odpowiedzialna nie może być pusta."}
 
     json_path = os.path.join(out_dir, "report.json")
     _write_json(report_data, json_path)
 
     pdf_path = os.path.join(out_dir, "report.pdf")
-    _pdf_report(report_data, pdf_path, password)
+    _pdf_report(report_data, pdf_path, password, responsible_person)
 
     zip_info = None
     if extracted_dir and os.path.isdir(extracted_dir):
