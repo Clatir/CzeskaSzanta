@@ -21,15 +21,19 @@ def _base_domain(name):
 def correlate_dns_tls_http(report_data):
     correlations = []
 
-    l7 = report_data.get("l7", {})
+    l7 = report_data.get("l7", {}) or {}
 
-    dns_data = l7.get("dns") or {}
-    tls_data = l7.get("tls") or {}
-    http_data = l7.get("http") or {}
+    dns_items = l7.get("dns") or []
+    tls_items = l7.get("tls") or []
+    http_items = l7.get("http") or []
 
-    dns_items = dns_data.get("items", []) or []
-    tls_items = tls_data.get("items", []) or []
-    http_items = http_data.get("items", []) or []
+    # oczekujemy list, nie słowników
+    if not isinstance(dns_items, list):
+        dns_items = []
+    if not isinstance(tls_items, list):
+        tls_items = []
+    if not isinstance(http_items, list):
+        http_items = []
 
     if not dns_items and not tls_items and not http_items:
         return correlations
@@ -74,29 +78,28 @@ def correlate_dns_tls_http(report_data):
     all_domains = set(dns_domains) | set(tls_domains) | set(http_domains)
 
     for dom in sorted(all_domains):
-        touches = []
+        layers = []
         if dom in dns_domains:
-            touches.append("DNS")
+            layers.append("DNS")
         if dom in tls_domains:
-            touches.append("TLS")
+            layers.append("TLS")
         if dom in http_domains:
-            touches.append("HTTP")
+            layers.append("HTTP")
 
-        # Interesują nas domeny, które pojawiły się co najmniej w dwóch warstwach
-        if len(touches) < 2:
+        # interesują nas tylko domeny, które pojawiły się w >= 2 warstwach
+        if len(layers) < 2:
             continue
 
         evidence = {
             "domain": dom,
-            "layers": touches,
+            "layers": layers,
             "dns": dns_domains.get(dom),
             "tls": tls_domains.get(dom),
             "http": http_domains.get(dom),
         }
 
         severity = "medium"
-        # jeżeli domena jest widoczna we wszystkich trzech warstwach, trochę wyżej
-        if len(touches) == 3:
+        if len(layers) == 3:
             severity = "high"
 
         correlations.append(

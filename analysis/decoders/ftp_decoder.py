@@ -1,102 +1,88 @@
+import os
+import subprocess
+import hashlib
 import pyshark
 
-FTP_CMDS = (
-    "USER", "PASS", "LIST", "RETR", "STOR",
-    "CWD", "PWD", "PASV", "PORT", "QUIT"
-)
+OUTPUT_DIR = "output/extracted_files"
 
+def ensure_output_dir():
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
 
-def decode_ftp(pcap_file):
-    cap = pyshark.FileCapture(pcap_file, keep_packets=False)
+def hash_file(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
 
-    items = []
-    errors = []
-
-    stats = {
-        "commands_total": 0,
-        "user": 0,
-        "pass": 0,
-        "retr": 0,
-        "stor": 0
-    }
+def extract_ftp_files(pcap_path):
+    ensure_output_dir()
 
     try:
-        for pkt in cap:
-            try:
-                if not hasattr(pkt, "tcp") or not hasattr(pkt.tcp, "payload"):
-                    continue
+        subprocess.run(
+            ["tshark", "-r", pcap_path, "--export-objects", f"ftp,{OUTPUT_DIR}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        return []
 
-                raw = pkt.tcp.payload.replace(":", "")
-                if not raw:
-                    continue
+    files = []
+    for filename in os.listdir(OUTPUT_DIR):
+        path = os.path.join(OUTPUT_DIR, filename)
+        if os.path.isfile(path):
+            files.append(path)
 
-                try:
-                    payload = bytes.fromhex(raw).decode(errors="ignore")
-                except:
-                    continue
+    return files
 
-                if not payload:
-                    continue
-
-                lines = payload.splitlines()
-                if not lines:
-                    continue
-
-                first = lines[0]
-                up = first.upper()
-
-                matched = None
-                for cmd in FTP_CMDS:
-                    if up.startswith(cmd + " ") or up == cmd:
-                        matched = cmd
-                        break
-
-                if not matched:
-                    continue
-
-                stats["commands_total"] += 1
-                if matched == "USER":
-                    stats["user"] += 1
-                if matched == "PASS":
-                    stats["pass"] += 1
-                if matched == "RETR":
-                    stats["retr"] += 1
-                if matched == "STOR":
-                    stats["stor"] += 1
-
-                src = dst = sport = dport = None
-                ts = None
-                try:
-                    src = pkt.ip.src
-                    dst = pkt.ip.dst
-                    sport = pkt.tcp.srcport
-                    dport = pkt.tcp.dstport
-                    ts = pkt.sniff_time.isoformat()
-                except:
-                    pass
-
-                arg = first[len(matched):].strip() if len(first) > len(matched) else ""
-
-                items.append({
-                    "timestamp": ts,
-                    "src_ip": src,
-                    "dst_ip": dst,
-                    "src_port": sport,
-                    "dst_port": dport,
-                    "command": matched,
-                    "arg": arg
-                })
-            except:
-                continue
+def decode_ftp(pcap_path):
+    try:
+        capture = pyshark.FileCapture(
+            pcap_path,
+            display_filter="ftp",
+            keep_packets=False
+        )
     except Exception as e:
-        errors.append(str(e))
-    finally:
-        cap.close()
+        return {"success": False, "message": f"Błąd FTP: {e}"}
+
+    ftp_entries = []
+
+    try:
+        for pkt in capture:
+            try:
+                ftp = pkt.ftp
+            except AttributeError:
+                continue
+
+            entry = {
+                "src_ip": getattr(pkt.ip, "src", None) if hasattr(pkt, "ip") else None,
+                "dst_ip": getattr(pkt.ip, "dst", None) if hasattr(pkt, "ip") else None,
+                "src_port": getattr(pkt.tcp, "srcport", None) if hasattr(pkt, "tcp") else None,
+                "dst_port": getattr(pkt.tcp, "dstport", None) if hasattr(pkt, "tcp") else None,
+                "command": getattr(ftp, "request_command", None),
+                "argument": getattr(ftp, "request_arg", None),
+                "response_code": getattr(ftp, "response_code", None),
+                "response_arg": getattr(ftp, "response_arg", None),
+            }
+
+            ftp_entries.append(entry)
+
+    except Exception:
+        pass
+
+    capture.close()
+
+    extracted_paths = extract_ftp_files(pcap_path)
+
+    extracted_info = []
+    for path in extracted_paths:
+        extracted_info.append({
+            "filename": os.path.basename(path),
+            "full_path": path,
+            "size": os.path.getsize(path),
+            "sha256": hash_file(path),
+            "protocol": "FTP"
+        })
 
     return {
-        "success": len(errors) == 0,
-        "protocol": "FTP",
-        "stats": stats,
-        "items": items,
-        "errors": errors
+        "success": True,
+        "entries": ftp_entries,
+        "extracted_files": extracted_info
     }

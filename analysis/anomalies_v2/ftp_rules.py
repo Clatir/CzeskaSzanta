@@ -7,18 +7,48 @@ def _build_anomaly(aid, severity, description, details=None):
         "details": details or {},
     }
 
+
 def check_ftp(report_data, ftp_data, sessions, ip_analysis):
     anomalies = []
 
-    if not ftp_data or not isinstance(ftp_data, dict):
+    # oczekujemy listy rekordów
+    if not ftp_data or not isinstance(ftp_data, list):
         return anomalies
 
-    stats = ftp_data.get("stats", {})
-    items = ftp_data.get("items", [])
+    retr = 0
+    stor = 0
+    user = 0
+    pw = 0
 
-    retr = stats.get("retr", 0)
-    stor = stats.get("stor", 0)
+    suspicious_ext = (".exe", ".dll", ".ps1", ".bat", ".vbs", ".scr")
+    suspicious_files = []
 
+    for it in ftp_data:
+        cmd = str(it.get("command", "")).upper()
+        arg = str(it.get("arg", "") or "")
+
+        if cmd == "RETR":
+            retr += 1
+        elif cmd == "STOR":
+            stor += 1
+        elif cmd == "USER":
+            user += 1
+        elif cmd == "PASS":
+            pw += 1
+
+        if cmd in ("RETR", "STOR"):
+            low_arg = arg.lower()
+            if any(low_arg.endswith(ext) for ext in suspicious_ext):
+                suspicious_files.append(
+                    {
+                        "command": cmd,
+                        "path": arg,
+                        "src_ip": it.get("src_ip"),
+                        "dst_ip": it.get("dst_ip"),
+                    }
+                )
+
+    # FTP-001: dużo pobrań plików
     if retr >= 20:
         anomalies.append(
             _build_anomaly(
@@ -29,6 +59,7 @@ def check_ftp(report_data, ftp_data, sessions, ip_analysis):
             )
         )
 
+    # FTP-002: dużo wysłań plików
     if stor >= 20:
         anomalies.append(
             _build_anomaly(
@@ -39,25 +70,14 @@ def check_ftp(report_data, ftp_data, sessions, ip_analysis):
             )
         )
 
-    # (opcjonalnie) podejrzane rozszerzenia plików
-    suspicious_ext = (".exe", ".dll", ".ps1", ".bat", ".vbs", ".scr")
-    sus_files = []
-
-    for it in items:
-        cmd = str(it.get("command", "")).upper()
-        if cmd not in ("RETR", "STOR"):
-            continue
-        arg = str(it.get("arg", "")).lower()
-        if any(arg.endswith(ext) for ext in suspicious_ext):
-            sus_files.append({"command": cmd, "path": it.get("arg")})
-
-    if sus_files:
+    # FTP-003: potencjalnie niebezpieczne pliki
+    if suspicious_files:
         anomalies.append(
             _build_anomaly(
                 "FTP-003",
                 "high",
                 "Transfer potencjalnie niebezpiecznych plików przez FTP.",
-                {"files": sus_files},
+                {"files": suspicious_files},
             )
         )
 

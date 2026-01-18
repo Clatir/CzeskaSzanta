@@ -1,96 +1,117 @@
+import os
+import subprocess
+import hashlib
 import pyshark
 
-SMTP_CMDS = ("HELO", "EHLO", "MAIL FROM", "RCPT TO", "DATA", "QUIT", "RSET", "NOOP")
+OUTPUT_DIR = "output/extracted_files"
 
 
-def decode_smtp(pcap_file):
-    cap = pyshark.FileCapture(pcap_file, keep_packets=False)
+def ensure_output_dir():
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
 
-    items = []
-    errors = []
 
-    stats = {
-        "commands_total": 0,
-        "mail_from": 0,
-        "rcpt_to": 0,
-        "data_seen": 0,
-    }
+def hash_file(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def extract_smtp_files(pcap_path):
+    ensure_output_dir()
 
     try:
-        for pkt in cap:
-            try:
-                if not hasattr(pkt, "tcp") or not hasattr(pkt.tcp, "payload"):
-                    continue
+        subprocess.run(
+            ["tshark", "-r", pcap_path, "--export-objects", f"smtp,{OUTPUT_DIR}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except Exception:
+        return []
 
-                raw = pkt.tcp.payload.replace(":", "")
-                if not raw:
-                    continue
+    files = []
+    for filename in os.listdir(OUTPUT_DIR):
+        path = os.path.join(OUTPUT_DIR, filename)
+        if os.path.isfile(path):
+            files.append(path)
 
-                try:
-                    payload = bytes.fromhex(raw).decode(errors="ignore")
-                except:
-                    continue
+    return files
 
-                if not payload:
-                    continue
 
-                lines = payload.splitlines()
-                if not lines:
-                    continue
-
-                first = lines[0]
-                up = first.upper()
-
-                matched = None
-                for cmd in SMTP_CMDS:
-                    if up.startswith(cmd):
-                        matched = cmd
-                        break
-
-                if not matched:
-                    continue
-
-                stats["commands_total"] += 1
-                if matched == "MAIL FROM":
-                    stats["mail_from"] += 1
-                if matched == "RCPT TO":
-                    stats["rcpt_to"] += 1
-                if matched == "DATA":
-                    stats["data_seen"] += 1
-
-                src = dst = sport = dport = None
-                ts = None
-                try:
-                    src = pkt.ip.src
-                    dst = pkt.ip.dst
-                    sport = pkt.tcp.srcport
-                    dport = pkt.tcp.dstport
-                    ts = pkt.sniff_time.isoformat()
-                except:
-                    pass
-
-                arg = first[len(matched):].strip() if len(first) > len(matched) else ""
-
-                items.append({
-                    "timestamp": ts,
-                    "src_ip": src,
-                    "dst_ip": dst,
-                    "src_port": sport,
-                    "dst_port": dport,
-                    "command": matched,
-                    "arg": arg
-                })
-            except:
-                continue
+def decode_smtp(pcap_path):
+    try:
+        capture = pyshark.FileCapture(
+            pcap_path,
+            display_filter="smtp",
+            keep_packets=False,
+        )
     except Exception as e:
-        errors.append(str(e))
-    finally:
-        cap.close()
+        return {"success": False, "message": f"Błąd SMTP: {e}"}
+
+    smtp_entries = []
+
+    try:
+        for pkt in capture:
+            try:
+                smtp = pkt.smtp
+            except AttributeError:
+                continue
+
+            # IP + porty (jeśli są obecne)
+            if hasattr(pkt, "ip"):
+                src_ip = getattr(pkt.ip, "src", None)
+                dst_ip = getattr(pkt.ip, "dst", None)
+            else:
+                src_ip = dst_ip = None
+
+            if hasattr(pkt, "tcp"):
+                src_port = getattr(pkt.tcp, "srcport", None)
+                dst_port = getattr(pkt.tcp, "dstport", None)
+            else:
+                src_port = dst_port = None
+
+            command = (
+                getattr(smtp, "req_command", None)
+                or getattr(smtp, "command", None)
+            )
+            parameter = getattr(smtp, "req_parameter", None)
+            response = getattr(smtp, "response", None)
+            response_code = getattr(smtp, "response_code", None)
+
+            entry = {
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "command": command,
+                "parameter": parameter,
+                "response": response,
+                "response_code": response_code,
+            }
+
+            smtp_entries.append(entry)
+
+    except Exception:
+        # nie zabijamy całego dekodera przez pojedynczy zły pakiet
+        pass
+
+    capture.close()
+
+    # eksport obiektów SMTP (wiadomości / załączników)
+    extracted_paths = extract_smtp_files(pcap_path)
+
+    extracted_info = []
+    for path in extracted_paths:
+        extracted_info.append({
+            "filename": os.path.basename(path),
+            "full_path": path,
+            "size": os.path.getsize(path),
+            "sha256": hash_file(path),
+            "protocol": "SMTP",
+        })
 
     return {
-        "success": len(errors) == 0,
-        "protocol": "SMTP",
-        "stats": stats,
-        "items": items,
-        "errors": errors
+        "success": True,
+        "entries": smtp_entries,
+        "extracted_files": extracted_info,
     }

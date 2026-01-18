@@ -1,5 +1,6 @@
 COMMON_SMTP_PORTS = {"25", "465", "587"}
 
+
 def _build_anomaly(aid, severity, description, details=None):
     return {
         "id": aid,
@@ -9,18 +10,36 @@ def _build_anomaly(aid, severity, description, details=None):
         "details": details or {},
     }
 
+
 def check_smtp(report_data, smtp_data, sessions, ip_analysis):
     anomalies = []
 
-    if not smtp_data or not isinstance(smtp_data, dict):
+    # oczekujemy listy rekordów SMTP
+    if not smtp_data or not isinstance(smtp_data, list):
         return anomalies
 
-    stats = smtp_data.get("stats", {})
-    items = smtp_data.get("items", [])
+    mail_from = 0
+    rcpt_to = 0
+    unusual_ports = set()
 
-    mail_from = stats.get("mail_from", 0)
-    rcpt_to = stats.get("rcpt_to", 0)
+    for it in smtp_data:
+        cmd = str(it.get("command") or "").upper()
+        param = str(it.get("parameter") or "")
+        dport = str(it.get("dst_port") or "").strip()
 
+        # MAIL FROM
+        if cmd == "MAIL" and param.upper().startswith("FROM:"):
+            mail_from += 1
+
+        # RCPT TO
+        if cmd == "RCPT" and param.upper().startswith("TO:"):
+            rcpt_to += 1
+
+        # SMTP na niestandardowych portach
+        if dport and dport not in COMMON_SMTP_PORTS:
+            unusual_ports.add(dport)
+
+    # SMTP-001: dużo odbiorców
     if rcpt_to >= 50:
         anomalies.append(
             _build_anomaly(
@@ -31,6 +50,7 @@ def check_smtp(report_data, smtp_data, sessions, ip_analysis):
             )
         )
 
+    # SMTP-002: dużo nadawców
     if mail_from >= 20:
         anomalies.append(
             _build_anomaly(
@@ -41,13 +61,7 @@ def check_smtp(report_data, smtp_data, sessions, ip_analysis):
             )
         )
 
-    # SMTP po nietypowych portach
-    unusual_ports = set()
-    for it in items:
-        dport = str(it.get("dst_port", "")).strip()
-        if dport and dport not in COMMON_SMTP_PORTS:
-            unusual_ports.add(dport)
-
+    # SMTP-003: ruch na nietypowych portach
     if unusual_ports:
         anomalies.append(
             _build_anomaly(

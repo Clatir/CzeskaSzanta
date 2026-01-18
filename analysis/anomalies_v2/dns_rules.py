@@ -20,17 +20,13 @@ def _extract_domain(qname):
 def check_dns(report_data, dns_data, sessions, ip_analysis):
     anomalies = []
 
-    if not dns_data or not isinstance(dns_data, dict):
-        return anomalies
-
-    items = dns_data.get("items", [])
-    if not items:
+    if not dns_data or not isinstance(dns_data, list):
         return anomalies
 
     long_queries = 0
     domain_buckets = {}
 
-    for it in items:
+    for it in dns_data:
         qname = it.get("qname") or it.get("query") or ""
         qname = str(qname)
         if len(qname) > 80:

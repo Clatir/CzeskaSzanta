@@ -1,5 +1,6 @@
 OLD_TLS = {"SSL 2.0", "SSL 3.0", "TLS 1.0", "TLS 1.1"}
 
+
 def _build_anomaly(aid, severity, description, details=None):
     return {
         "id": aid,
@@ -13,17 +14,14 @@ def _build_anomaly(aid, severity, description, details=None):
 def check_tls(report_data, tls_data, sessions, ip_analysis):
     anomalies = []
 
-    if not tls_data or not isinstance(tls_data, dict):
-        return anomalies
-
-    items = tls_data.get("items", [])
-    if not items:
+    # oczekujemy listy rekordów TLS
+    if not tls_data or not isinstance(tls_data, list):
         return anomalies
 
     old_version_count = 0
     versions_seen = set()
 
-    for it in items:
+    for it in tls_data:
         ver = str(it.get("version", "")).upper()
         if ver:
             versions_seen.add(ver)

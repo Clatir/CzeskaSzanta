@@ -21,17 +21,22 @@ def correlate_ftp_http(report_data):
     sessions_data = report_data.get("sessions", {}) or {}
     sessions = sessions_data.get("sessions", []) or []
 
-    ftp_data = l7.get("ftp") or {}
-    http_data = l7.get("http") or {}
-    tls_data = l7.get("tls") or {}
+    # teraz zakładamy listy, nie słowniki
+    ftp_items = l7.get("ftp") or []
+    http_items = l7.get("http") or []
+    tls_items = l7.get("tls") or []
 
-    ftp_items = ftp_data.get("items", []) or []
-    http_items = http_data.get("items", []) or []
-    tls_items = tls_data.get("items", []) or []
+    if not isinstance(ftp_items, list):
+        ftp_items = []
+    if not isinstance(http_items, list):
+        http_items = []
+    if not isinstance(tls_items, list):
+        tls_items = []
 
     if not ftp_items:
         return correlations
 
+    # FTP: liczymy komendy RETR / STOR per (src_ip, dst_ip)
     ftp_pairs = {}
     for it in ftp_items:
         src_ip = it.get("src_ip")
@@ -39,29 +44,31 @@ def correlate_ftp_http(report_data):
         p = _pair(src_ip, dst_ip)
         if not p:
             continue
-        ftp_pairs.setdefault(p, {"commands": 0, "retr": 0, "stor": 0})
-        ftp_pairs[p]["commands"] += 1
+
+        bucket = ftp_pairs.setdefault(p, {"commands": 0, "retr": 0, "stor": 0})
+        bucket["commands"] += 1
+
         cmd = str(it.get("command", "")).upper()
         if cmd == "RETR":
-            ftp_pairs[p]["retr"] += 1
+            bucket["retr"] += 1
         if cmd == "STOR":
-            ftp_pairs[p]["stor"] += 1
+            bucket["stor"] += 1
 
+    # HTTP: liczymy ilość requestów per (src_ip, dst_ip)
     http_pairs = {}
     for it in http_items:
         p = _pair(it.get("src_ip"), it.get("dst_ip"))
         if not p:
             continue
-        http_pairs.setdefault(p, 0)
-        http_pairs[p] += 1
+        http_pairs[p] = http_pairs.get(p, 0) + 1
 
+    # TLS: liczymy ilość sesji per (src_ip, dst_ip)
     tls_pairs = {}
     for it in tls_items:
         p = _pair(it.get("src_ip"), it.get("dst_ip"))
         if not p:
             continue
-        tls_pairs.setdefault(p, 0)
-        tls_pairs[p] += 1
+        tls_pairs[p] = tls_pairs.get(p, 0) + 1
 
     pairs_http_tls = set(http_pairs.keys()) | set(tls_pairs.keys())
     common_pairs = set(ftp_pairs.keys()) & pairs_http_tls
@@ -85,6 +92,7 @@ def correlate_ftp_http(report_data):
         ftp_retr = ftp_stats["retr"]
         ftp_stor = ftp_stats["stor"]
 
+        # interesują nas pary, gdzie jest faktycznie intensywny transfer plików
         if (ftp_retr + ftp_stor) < 5:
             continue
 

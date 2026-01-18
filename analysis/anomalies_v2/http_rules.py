@@ -26,15 +26,12 @@ def _build_anomaly(aid, severity, description, protocol, details=None):
 def check_http(report_data, http_data, sessions, ip_analysis):
     anomalies = []
 
-    if not http_data or not isinstance(http_data, dict):
-        return anomalies
-
-    items = http_data.get("items", [])
-    if not items:
+    # oczekujemy listy rekordów HTTP
+    if not http_data or not isinstance(http_data, list):
         return anomalies
 
     # 1) Podejrzane metody HTTP
-    for it in items:
+    for it in http_data:
         method = str(it.get("method", "")).upper()
         if method in SUSPICIOUS_METHODS:
             anomalies.append(
@@ -46,14 +43,14 @@ def check_http(report_data, http_data, sessions, ip_analysis):
                     {
                         "method": method,
                         "host": it.get("host"),
-                        "uri": it.get("uri") or it.get("path"),
+                        "uri": it.get("uri"),
                     },
                 )
             )
 
     # 2) Pobieranie potencjalnie niebezpiecznych plików
-    for it in items:
-        uri = it.get("uri") or it.get("path") or ""
+    for it in http_data:
+        uri = it.get("uri") or ""
         uri_l = str(uri).lower()
         if any(uri_l.endswith(ext) for ext in SUSPICIOUS_EXT):
             anomalies.append(
@@ -66,14 +63,14 @@ def check_http(report_data, http_data, sessions, ip_analysis):
                         "method": it.get("method"),
                         "host": it.get("host"),
                         "uri": uri,
-                        "status": it.get("status"),
+                        "status_code": it.get("status_code"),
                     },
                 )
             )
 
     # 3) Bardzo dużo żądań do jednego hosta
     host_counts = {}
-    for it in items:
+    for it in http_data:
         host = it.get("host")
         if not host:
             continue
