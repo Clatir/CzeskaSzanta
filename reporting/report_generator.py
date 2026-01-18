@@ -1,3 +1,60 @@
+import json
+import os
+from datetime import datetime
+from getpass import getpass
+from textwrap import wrap
+
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
+from reportlab.lib import pdfencrypt
+
+
+def _ensure_dir(path):
+    os.makedirs(path, exist_ok=True)
+
+def _write_json(report_data, out_path):
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(report_data, f, ensure_ascii=False, indent=2)
+
+def _zip_folder_with_password(src_dir, zip_path, password):
+    password_bytes = password.encode("utf-8")
+
+    try:
+        import pyzipper
+        with pyzipper.AESZipFile(
+            zip_path,
+            "w",
+            compression=pyzipper.ZIP_DEFLATED,
+            encryption=pyzipper.WZ_AES
+        ) as zf:
+            zf.setpassword(password_bytes)
+            for root, _, files in os.walk(src_dir):
+                for fn in files:
+                    full = os.path.join(root, fn)
+                    rel = os.path.relpath(full, src_dir)
+                    zf.write(full, arcname=rel)
+        return {"success": True, "method": "AES", "zip": zip_path}
+    except ImportError:
+        import zipfile
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for root, _, files in os.walk(src_dir):
+                for fn in files:
+                    full = os.path.join(root, fn)
+                    rel = os.path.relpath(full, src_dir)
+                    with open(full, "rb") as fh:
+                        data = fh.read()
+                    zf.writestr(rel, data, compress_type=zipfile.ZIP_DEFLATED)
+        return {
+            "success": True,
+            "method": "NONE",
+            "zip": zip_path,
+            "warning": (
+                "Brak pyzipper → ZIP bez szyfrowania AES. "
+                "Zainstaluj pyzipper, aby mieć ZIP-AES."
+            )
+        }
+
 def _pdf_report(report_data, pdf_path, password, responsible_person):
     enc = pdfencrypt.StandardEncryption(
         userPassword=password,
@@ -477,3 +534,37 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
     c.showPage()
     c.save()
+
+def generate_final_report(report_data, base_output_dir="reports", extracted_dir=None):
+    _ensure_dir(base_output_dir)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = os.path.join(base_output_dir, stamp)
+    _ensure_dir(out_dir)
+
+    password = getpass("Podaj hasło do PDF/ZIP: ").strip()
+    if not password:
+        return {"success": False, "message": "Hasło nie może być puste."}
+
+    responsible_person = input("Podaj osobę odpowiedzialną za raport: ")
+    if not responsible_person:
+        return {"success": False, "message": "Osoba odpowiedzialna nie może być pusta."}
+
+    json_path = os.path.join(out_dir, "report.json")
+    _write_json(report_data, json_path)
+
+    pdf_path = os.path.join(out_dir, "report.pdf")
+    _pdf_report(report_data, pdf_path, password, responsible_person)
+
+    zip_info = None
+    if extracted_dir and os.path.isdir(extracted_dir):
+        zip_path = os.path.join(out_dir, "extracted_files.zip")
+        zip_info = _zip_folder_with_password(extracted_dir, zip_path, password)
+
+    return {
+        "success": True,
+        "message": "Raport wygenerowany.",
+        "output_dir": out_dir,
+        "json": json_path,
+        "pdf": pdf_path,
+        "zip": zip_info,
+    }
