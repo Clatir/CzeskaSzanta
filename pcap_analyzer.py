@@ -404,7 +404,7 @@ class ForensicApp:
             return
         
         for a in anomalies[:10]:
-            print(f"[{a['severity'].upper()}] ({a['protocol']}) - {a['aid']}")
+            print(f"[{a['severity'].upper()}] ({a['protocol']}) - {a['id']}:")
             print(f"   {a['description']}")
             if "details" in a and a["details"]:
                 print(f"   → {a['details']}")
@@ -419,7 +419,7 @@ class ForensicApp:
         self.clear()
         print("=== Korelacje scenariuszy ===\n")
 
-        if self.loaded_file is None:
+        if not self.is_file_loaded():
             print("[!] Najpierw wczytaj plik.")
             input("Enter...")
             return
