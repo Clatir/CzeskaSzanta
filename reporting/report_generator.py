@@ -1,63 +1,3 @@
-import json
-import os
-from datetime import datetime
-from getpass import getpass
-from textwrap import wrap
-
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import mm
-from reportlab.lib import pdfencrypt
-
-
-def _ensure_dir(path):
-    os.makedirs(path, exist_ok=True)
-
-
-def _write_json(report_data, out_path):
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(report_data, f, ensure_ascii=False, indent=2)
-
-
-def _zip_folder_with_password(src_dir, zip_path, password):
-    password_bytes = password.encode("utf-8")
-
-    try:
-        import pyzipper
-        with pyzipper.AESZipFile(
-            zip_path,
-            "w",
-            compression=pyzipper.ZIP_DEFLATED,
-            encryption=pyzipper.WZ_AES
-        ) as zf:
-            zf.setpassword(password_bytes)
-            for root, _, files in os.walk(src_dir):
-                for fn in files:
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, src_dir)
-                    zf.write(full, arcname=rel)
-        return {"success": True, "method": "AES", "zip": zip_path}
-    except ImportError:
-        import zipfile
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for root, _, files in os.walk(src_dir):
-                for fn in files:
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, src_dir)
-                    with open(full, "rb") as fh:
-                        data = fh.read()
-                    zf.writestr(rel, data, compress_type=zipfile.ZIP_DEFLATED)
-        return {
-            "success": True,
-            "method": "NONE",
-            "zip": zip_path,
-            "warning": (
-                "Brak pyzipper → ZIP bez szyfrowania AES. "
-                "Zainstaluj pyzipper, aby mieć ZIP-AES."
-            )
-        }
-
-
 def _pdf_report(report_data, pdf_path, password, responsible_person):
     enc = pdfencrypt.StandardEncryption(
         userPassword=password,
@@ -71,30 +11,38 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
     c = canvas.Canvas(pdf_path, pagesize=A4, encrypt=enc)
     w, h = A4
 
-    # Marginesy i podstawowe parametry
+    # Marginesy i parametry tekstu
     MARGIN_LEFT = 20 * mm
     MARGIN_RIGHT = 20 * mm
     MARGIN_TOP = 20 * mm
     MARGIN_BOTTOM = 20 * mm
     LINE_HEIGHT = 5 * mm
 
+    # domyślna czcionka „body”
+    DEFAULT_FONT_NAME = "Helvetica"
+    DEFAULT_FONT_SIZE = 10
+    DEFAULT_MAX_CHARS = 90  # trzymamy się tego wszędzie, żeby nie wychodzić poza prawy margines
+
     y = h - MARGIN_TOP
+
+    def set_body_font():
+        c.setFont(DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE)
 
     def new_page():
         nonlocal y
         c.showPage()
         y = h - MARGIN_TOP
+        set_body_font()  # <–– po nowej stronie zawsze wracamy do body font
 
     def ensure_space(lines=1):
         nonlocal y
         if y - lines * LINE_HEIGHT < MARGIN_BOTTOM:
             new_page()
 
-    def draw_wrapped(text, x, max_chars=100, bullet=None):
+    def draw_wrapped(text, x, max_chars=DEFAULT_MAX_CHARS, bullet=None):
         """
-        Proste zawijanie tekstu w oparciu o liczbę znaków.
-        Nie jest idealnie zależne od szerokości w mm, ale
-        respektuje marginesy i nie wychodzi poza prawą krawędź.
+        Proste zawijanie tekstu po liczbie znaków.
+        max_chars ustawione tak, żeby zmieścić się między MARGIN_LEFT a MARGIN_RIGHT.
         """
         nonlocal y
         if text is None:
@@ -102,6 +50,9 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         text = str(text)
         if not text:
             return
+
+        # pilnujemy, żeby max_chars nigdy nie był większy od "bezpiecznego"
+        max_chars = min(max_chars, DEFAULT_MAX_CHARS)
 
         lines = wrap(text, max_chars)
         for i, line in enumerate(lines):
@@ -131,14 +82,16 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                 y + LINE_HEIGHT * 0.4
             )
             y -= LINE_HEIGHT * 0.5
+        # po tytule wracamy do body font
+        set_body_font()
 
-    def kv(label, value, max_chars=80):
+    def kv(label, value, max_chars=DEFAULT_MAX_CHARS):
         nonlocal y
         ensure_space()
         c.setFont("Helvetica-Bold", 10)
         c.drawString(MARGIN_LEFT, y, f"{label}:")
-        c.setFont("Helvetica", 10)
         y -= LINE_HEIGHT
+        set_body_font()
         draw_wrapped(value, MARGIN_LEFT + 10 * mm, max_chars=max_chars)
         y -= LINE_HEIGHT * 0.3
 
@@ -148,13 +101,13 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
     y -= LINE_HEIGHT * 2
 
     c.setFont("Helvetica", 11)
-    draw_wrapped(f"Osoba odpowiedzialna za raport: {responsible_person}", MARGIN_LEFT, max_chars=90)
+    draw_wrapped(f"Osoba odpowiedzialna za raport: {responsible_person}", MARGIN_LEFT)
     draw_wrapped(
         "Data wygenerowania: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        MARGIN_LEFT,
-        max_chars=90
+        MARGIN_LEFT
     )
     y -= LINE_HEIGHT
+    set_body_font()
 
     # ========= 1. METADANE I INFORMACJE O PLIKU =========
     section_title("1. Metadane i informacje o pliku", level=1)
@@ -164,7 +117,8 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         c.setFont("Helvetica-Bold", 11)
         c.drawString(MARGIN_LEFT, y, "1.1 Metadane źródła")
         y -= LINE_HEIGHT * 1.2
-        c.setFont("Helvetica", 10)
+        set_body_font()
+
         kv("Źródło", metadata.get("source", "N/A"))
         kv("Ścieżka pliku", metadata.get("file_path", "N/A"))
         kv("SHA256 (źródło)", metadata.get("sha256", "N/A"))
@@ -175,7 +129,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         c.setFont("Helvetica-Bold", 11)
         c.drawString(MARGIN_LEFT, y, "1.2 Informacje o pliku PCAP")
         y -= LINE_HEIGHT * 1.2
-        c.setFont("Helvetica", 10)
+        set_body_font()
 
         kv("Plik", file_info.get("file", "N/A"))
         kv("Rozmiar [bajtów]", file_info.get("size", "N/A"))
@@ -198,7 +152,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         c.setFont("Helvetica-Bold", 11)
         c.drawString(MARGIN_LEFT, y, "2.1 Zestawienie protokołów L7")
         y -= LINE_HEIGHT * 1.2
-        c.setFont("Helvetica", 10)
+        set_body_font()
 
         if total_packets is not None:
             kv("Łączna liczba pakietów", total_packets)
@@ -211,26 +165,26 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN_LEFT, y, "Statystyki per protokół:")
             y -= LINE_HEIGHT * 1.2
-            c.setFont("Helvetica", 10)
+            set_body_font()
 
             for proto_name in sorted(per_proto.keys()):
                 cnt = per_proto.get(proto_name, 0)
                 conf = confidence.get(proto_name, 0.0)
-                ensure_space()
                 line = f"- {proto_name}: pakiety={cnt}, pewność={conf:.2f}"
-                draw_wrapped(line, MARGIN_LEFT + 5 * mm, max_chars=90)
+                draw_wrapped(line, MARGIN_LEFT + 5 * mm, bullet=None)
 
         if flow_map:
             ensure_space(2)
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN_LEFT, y, "2.2 Mapa przepływów (flow_map)")
             y -= LINE_HEIGHT * 1.2
-            c.setFont("Helvetica", 9)
+            set_body_font()
 
-            # Prosta „tabelka” tekstowa
             ensure_space()
+            c.setFont("Helvetica-Bold", 9)
             c.drawString(MARGIN_LEFT, y, "Flow key / L4 / total / top L7")
             y -= LINE_HEIGHT
+            set_body_font()
 
             for flow_key, info in flow_map.items():
                 l4 = info.get("l4", "N/A")
@@ -240,7 +194,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                     f"{p}:{n}" for p, n in sorted(counts.items(), key=lambda x: -x[1])
                 ) or "-"
                 line = f"- {flow_key} | {l4} | pakiety={total} | L7={top_l7}"
-                draw_wrapped(line, MARGIN_LEFT + 5 * mm, max_chars=100)
+                draw_wrapped(line, MARGIN_LEFT + 5 * mm)
 
     # ========= 3. ANALIZA ADRESÓW IP =========
     section_title("3. Analiza adresów IP", level=1)
@@ -254,7 +208,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         c.setFont("Helvetica-Bold", 11)
         c.drawString(MARGIN_LEFT, y, "3.1 Podsumowanie adresów")
         y -= LINE_HEIGHT * 1.2
-        c.setFont("Helvetica", 10)
+        set_body_font()
 
         kv("Liczba unikalnych IP publicznych", len(public_ips))
         if private_ips:
@@ -265,19 +219,25 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN_LEFT, y, "Lista IP publicznych:")
             y -= LINE_HEIGHT * 1.1
+            set_body_font()
+
             c.setFont("Helvetica", 9)
             for ip in public_ips:
-                draw_wrapped(ip, MARGIN_LEFT + 5 * mm, max_chars=90, bullet="-")
+                draw_wrapped(ip, MARGIN_LEFT + 5 * mm, bullet="-")
+            set_body_font()
 
         if country_stats:
             ensure_space(2)
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN_LEFT, y, "3.2 Ruch wg krajów (country_stats)")
             y -= LINE_HEIGHT * 1.2
+            set_body_font()
+
             c.setFont("Helvetica", 9)
             for country, count in sorted(country_stats.items(), key=lambda x: -x[1]):
                 line = f"{country}: {count} pakietów"
-                draw_wrapped(line, MARGIN_LEFT + 5 * mm, max_chars=90, bullet="-")
+                draw_wrapped(line, MARGIN_LEFT + 5 * mm, bullet="-")
+            set_body_font()
 
     # ========= 4. SESJE TCP/UDP =========
     section_title("4. Sesje TCP/UDP", level=1)
@@ -287,14 +247,14 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         total_sessions = sessions_data.get("total_sessions", 0)
         sessions = sessions_data.get("sessions", [])
 
-        c.setFont("Helvetica", 10)
         kv("Łączna liczba sesji", total_sessions)
 
         c.setFont("Helvetica-Bold", 10)
         c.drawString(MARGIN_LEFT, y, "Lista sesji:")
         y -= LINE_HEIGHT * 1.2
-        c.setFont("Helvetica", 9)
+        set_body_font()
 
+        c.setFont("Helvetica", 9)
         for s in sessions:
             ensure_space(3)
             sid = s.get("id")
@@ -310,8 +270,9 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             line1 = f"Sesja ID {sid} | {proto} | {src_ip}:{src_port} -> {dst_ip}:{dst_port} | kierunek={direction}"
             line2 = f"Pakiety={pkt_count}, bajty={bytes_total}"
 
-            draw_wrapped(line1, MARGIN_LEFT + 5 * mm, max_chars=100, bullet="-")
-            draw_wrapped(line2, MARGIN_LEFT + 10 * mm, max_chars=100)
+            draw_wrapped(line1, MARGIN_LEFT + 5 * mm, bullet="-")
+            draw_wrapped(line2, MARGIN_LEFT + 10 * mm)
+        set_body_font()
 
     # ========= 5. DANE L7 =========
     section_title("5. Dane warstwy aplikacji (L7)", level=1)
@@ -324,8 +285,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             return
         ensure_space(2)
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(MARGIN_LEFT, y, f"5.{_render_l7_list.counter} {proto_name}")
-        _render_l7_list.counter += 1
+        c.drawString(MARGIN_LEFT, y, f"{proto_name}")
         y -= LINE_HEIGHT * 1.2
         c.setFont("Helvetica", 9)
 
@@ -339,12 +299,10 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             if not parts:
                 continue
             line = ", ".join(parts)
-            draw_wrapped(line, MARGIN_LEFT + 5 * mm, max_chars=105, bullet="-")
-
-    _render_l7_list.counter = 1
+            draw_wrapped(line, MARGIN_LEFT + 5 * mm)
+        set_body_font()
 
     if isinstance(l7, dict):
-        # DNS
         dns_items = l7.get("dns") or l7.get("DNS")
         if isinstance(dns_items, list):
             _render_l7_list(
@@ -360,7 +318,6 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                 ],
             )
 
-        # HTTP
         http_items = l7.get("http") or l7.get("HTTP")
         if isinstance(http_items, list):
             _render_l7_list(
@@ -378,7 +335,6 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                 ],
             )
 
-        # FTP
         ftp_items = l7.get("ftp") or l7.get("FTP")
         if isinstance(ftp_items, list):
             _render_l7_list(
@@ -389,11 +345,10 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                     ("dst_ip", "dst_ip"),
                     ("cmd", "command"),
                     ("arg", "argument"),
-                    ("code", "reply_code"),
+                    ("code", "response_code"),
                 ],
             )
 
-        # SMTP
         smtp_items = l7.get("smtp") or l7.get("SMTP")
         if isinstance(smtp_items, list):
             _render_l7_list(
@@ -403,13 +358,12 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                     ("src_ip", "src_ip"),
                     ("dst_ip", "dst_ip"),
                     ("cmd", "command"),
-                    ("arg", "argument"),
-                    ("mail_from", "mail_from"),
-                    ("rcpt_to", "rcpt_to"),
+                    ("param", "parameter"),
+                    ("resp", "response"),
+                    ("code", "response_code"),
                 ],
             )
 
-        # TLS
         tls_items = l7.get("tls") or l7.get("TLS")
         if isinstance(tls_items, list):
             _render_l7_list(
@@ -418,10 +372,9 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                 [
                     ("src_ip", "src_ip"),
                     ("dst_ip", "dst_ip"),
-                    ("version", "record_version"),
+                    ("version", "version"),
                     ("sni", "sni"),
                     ("cipher", "cipher"),
-                    ("handshake", "handshake_type"),
                 ],
             )
 
@@ -429,10 +382,10 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
     section_title("6. Wykryte anomalie", level=1)
 
     anomalies = report_data.get("anomalies", [])
-    c.setFont("Helvetica", 10)
+    set_body_font()
 
     if not anomalies:
-        draw_wrapped("Brak wykrytych anomalii.", MARGIN_LEFT + 5 * mm, max_chars=100)
+        draw_wrapped("Brak wykrytych anomalii.", MARGIN_LEFT + 5 * mm)
     else:
         for a in anomalies:
             proto = a.get("protocol", "N/A")
@@ -444,28 +397,61 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             ensure_space(3)
             c.setFont("Helvetica-Bold", 10)
             title = f"[{sev}] {proto} / {atype}"
-            draw_wrapped(title, MARGIN_LEFT + 5 * mm, max_chars=100, bullet="-")
+            draw_wrapped(title, MARGIN_LEFT + 5 * mm, bullet="-")
 
             c.setFont("Helvetica", 9)
             if desc:
-                draw_wrapped(desc, MARGIN_LEFT + 10 * mm, max_chars=105)
+                draw_wrapped(desc, MARGIN_LEFT + 10 * mm)
             if details:
-                # wypisz szczegóły jako klucz=wartość
                 for dk, dv in details.items():
                     line = f"{dk}: {dv}"
-                    draw_wrapped(line, MARGIN_LEFT + 10 * mm, max_chars=105)
+                    draw_wrapped(line, MARGIN_LEFT + 10 * mm)
+            set_body_font()
 
-    # ========= 7. WYEKSTRAHOWANE PLIKI =========
-    section_title("7. Wyekstrahowane pliki", level=1)
+    # ========= 7. KORELACJE =========
+    section_title("7. Korelacje między protokołami", level=1)
+
+    correlations = report_data.get("correlations", [])
+    set_body_font()
+
+    if not correlations:
+        draw_wrapped(
+            "Brak znalezionych korelacji między protokołami.",
+            MARGIN_LEFT + 5 * mm,
+        )
+    else:
+        for corr in correlations:
+            ensure_space(3)
+            cid = corr.get("id", "N/A")
+            sev = str(corr.get("severity", "n/a")).upper()
+            desc = corr.get("description", "")
+            prots = corr.get("protocols", [])
+            evidence = corr.get("evidence", {})
+
+            c.setFont("Helvetica-Bold", 10)
+            header = f"[{sev}] {cid} / protokoły: {', '.join(prots) if prots else 'N/A'}"
+            draw_wrapped(header, MARGIN_LEFT + 5 * mm, bullet="-")
+
+            c.setFont("Helvetica", 9)
+            if desc:
+                draw_wrapped(desc, MARGIN_LEFT + 10 * mm)
+
+            if evidence:
+                for ek, ev in evidence.items():
+                    line = f"{ek}: {ev}"
+                    draw_wrapped(line, MARGIN_LEFT + 10 * mm)
+            set_body_font()
+
+    # ========= 8. WYEKSTRAHOWANE PLIKI =========
+    section_title("8. Wyekstrahowane pliki", level=1)
 
     extracted_files = report_data.get("extracted_files", [])
-    c.setFont("Helvetica", 10)
+    set_body_font()
 
     if not extracted_files:
         draw_wrapped(
             "Brak wyekstrahowanych plików z protokołów aplikacyjnych.",
             MARGIN_LEFT + 5 * mm,
-            max_chars=100
         )
     else:
         for f in extracted_files:
@@ -478,51 +464,16 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
             c.setFont("Helvetica-Bold", 10)
             draw_wrapped(
-                f"- {fname} (protokoł: {proto})",
+                f"- {fname} (protokół: {proto})",
                 MARGIN_LEFT + 5 * mm,
-                max_chars=100
             )
             c.setFont("Helvetica", 9)
             if full:
-                draw_wrapped(f"Ścieżka: {full}", MARGIN_LEFT + 10 * mm, max_chars=105)
-            draw_wrapped(f"Rozmiar: {size} bajtów", MARGIN_LEFT + 10 * mm, max_chars=105)
+                draw_wrapped(f"Ścieżka: {full}", MARGIN_LEFT + 10 * mm)
+            draw_wrapped(f"Rozmiar: {size} bajtów", MARGIN_LEFT + 10 * mm)
             if sha:
-                draw_wrapped(f"SHA256: {sha}", MARGIN_LEFT + 10 * mm, max_chars=105)
+                draw_wrapped(f"SHA256: {sha}", MARGIN_LEFT + 10 * mm)
+            set_body_font()
 
     c.showPage()
     c.save()
-
-
-def generate_final_report(report_data, base_output_dir="reports", extracted_dir=None):
-    _ensure_dir(base_output_dir)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(base_output_dir, stamp)
-    _ensure_dir(out_dir)
-
-    password = getpass("Podaj hasło do PDF/ZIP: ").strip()
-    if not password:
-        return {"success": False, "message": "Hasło nie może być puste."}
-
-    responsible_person = input("Podaj osobę odpowiedzialną za raport: ")
-    if not responsible_person:
-        return {"success": False, "message": "Osoba odpowiedzialna nie może być pusta."}
-
-    json_path = os.path.join(out_dir, "report.json")
-    _write_json(report_data, json_path)
-
-    pdf_path = os.path.join(out_dir, "report.pdf")
-    _pdf_report(report_data, pdf_path, password, responsible_person)
-
-    zip_info = None
-    if extracted_dir and os.path.isdir(extracted_dir):
-        zip_path = os.path.join(out_dir, "extracted_files.zip")
-        zip_info = _zip_folder_with_password(extracted_dir, zip_path, password)
-
-    return {
-        "success": True,
-        "message": "Raport wygenerowany.",
-        "output_dir": out_dir,
-        "json": json_path,
-        "pdf": pdf_path,
-        "zip": zip_info,
-    }
