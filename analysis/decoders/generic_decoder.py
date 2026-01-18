@@ -1,18 +1,24 @@
 from analysis.decoders.http_decoder import decode_http
 from analysis.decoders.dns_decoder import decode_dns
 from analysis.decoders.tls_decoder import decode_tls
+from analysis.decoders.smtp_decoder import decode_smtp
+from analysis.decoders.ftp_decoder import decode_ftp
 
 SUPPORTED_PROTOCOLS = {
     "HTTP": decode_http,
     "DNS": decode_dns,
-    "TLS": decode_tls
+    "TLS": decode_tls,
+    "SMTP": decode_smtp,
+    "FTP": decode_ftp
 }
 
 def decode_all_l7(pcap_path, present_protocols):
     results = {
         "http": [],
         "dns": [],
-        "tls": []
+        "tls": [],
+        "smtp": [],
+        "ftp": []
     }
 
     extracted_files = []

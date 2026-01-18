@@ -32,9 +32,10 @@ class ForensicApp:
             print("[9] Sesje TCP/UDP (IN/OUT)")
             print("[10] Ekstrakcja danych L7")
             print("[11] Wykrywanie anomalii")
+            print("[12] Wykrywanie korelacji scenariuszy")
             print("")
             print("RAPORT:")
-            print("[12] Raport końcowy (JSON/HTML/AES)")
+            print("[13] Raport końcowy (JSON/HTML/AES)")
             print("")
             print("[0] Wyjście")
 
@@ -64,6 +65,8 @@ class ForensicApp:
                 case "11":
                     self.detect_anomalies()
                 case "12":
+                    self.detect_correlations()
+                case "13":
                     self.generate_report()
                 case "0":
                     self.clear()
@@ -85,11 +88,7 @@ class ForensicApp:
             "protocols": {},
             "ip_analysis": {},
             "sessions": {},
-            "l7": {
-                "http": [],
-                "dns": [],
-                "tls": []
-            },
+            "l7": {},
             "anomalies": [],
             "extracted_files": []
         }
@@ -386,7 +385,7 @@ class ForensicApp:
         input("Enter...")
 
     def detect_anomalies(self):
-        from analysis.anomalies.anomaly_engine import run_anomaly_detection
+        from analysis.anomalies_v2.anomaly_engine import detect_anomalies
 
         self.clear()
         print("=== Wykrywanie anomalii ===\n")
@@ -395,20 +394,53 @@ class ForensicApp:
             print("[!] Najpierw wczytaj plik.")
             input("Enter...")
             return
-
-        anomalies = run_anomaly_detection(self.report_data)
+        
+        anomalies = detect_anomalies(self.report_data)
         self.report_data["anomalies"] = anomalies
 
         if not anomalies:
             print("Brak wykrytych anomalii.")
             input("Enter...")
             return
-
-        for a in anomalies:
+        
+        for a in anomalies[:10]:
             print(f"[{a['severity'].upper()}] ({a['protocol']}) {a['type']}")
             print(f"   {a['description']}")
-            if a.get("details"):
-                print(f"   → {a['details']}\n")
+            if "details" in a and a["details"]:
+                print(f"   → {a['details']}")
+        if len(anomalies) > 10:
+            print("... (więcej w raporcie)")
+
+        input("Enter...")
+
+    def detect_correlations(self):
+        from analysis.correlations.correlation_engine import detect_correlations
+
+        self.clear()
+        print("=== Korelacje scenariuszy ===\n")
+
+        if self.loaded_file is None:
+            print("[!] Najpierw wczytaj plik.")
+            input("Enter...")
+            return
+
+        correlations = detect_correlations(self.report_data)
+        self.report_data["correlations"] = correlations
+
+        if not correlations:
+            print("Brak wykrytych korelacji scenariuszy.")
+            input("Enter...")
+            return
+
+        for c in correlations:
+            print(f"[{c['severity'].upper()}] {c['id']}: {c['description']}")
+            prots = ", ".join(c.get("protocols", []))
+            print(f"   Protokoły: {prots}")
+            ev = c.get("evidence", {})
+            if ev:
+                print(f"   Evidence: {ev}")
+            print()
+
         input("Enter...")
 
     def generate_report(self):
