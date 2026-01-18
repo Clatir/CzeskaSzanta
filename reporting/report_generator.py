@@ -503,7 +503,7 @@ def generate_final_report(report_data, base_output_dir="reports", extracted_dir=
     if not password:
         return {"success": False, "message": "Hasło nie może być puste."}
 
-    responsible_person = input("Podaj osobę odpowiedzialną za raport: ").strip()
+    responsible_person = input("Podaj osobę odpowiedzialną za raport: ")
     if not responsible_person:
         return {"success": False, "message": "Osoba odpowiedzialna nie może być pusta."}
 
