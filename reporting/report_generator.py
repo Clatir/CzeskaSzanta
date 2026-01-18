@@ -4,6 +4,8 @@ from datetime import datetime
 from getpass import getpass
 from textwrap import wrap
 
+from xml.sax.saxutils import escape
+
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -88,7 +90,6 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
     )
 
     styles = getSampleStyleSheet()
-    # bazowy tekst
     body = styles["Normal"]
     body.fontName = "Helvetica"
     body.fontSize = 10
@@ -133,7 +134,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
     def kv(label, value, style=body):
         val = "-" if value is None else str(value)
-        story.append(Paragraph(f"<b>{label}:</b> {val}", style))
+        story.append(Paragraph(f"<b>{escape(str(label))}:</b> {escape(val)}", style))
         story.append(Spacer(1, 2))
 
     # ===================== STRONA TYTUŁOWA =====================
@@ -142,7 +143,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
     story.append(
         Paragraph(
-            f"Osoba odpowiedzialna za raport: {responsible_person or '-'}",
+            f"Osoba odpowiedzialna za raport: {escape(responsible_person or '-')}",
             body,
         )
     )
@@ -217,7 +218,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             story.append(t)
             story.append(Spacer(1, 8))
 
-        # flow_map jako tabela (jeżeli jest w takim formacie, jak zakładaliśmy)
+        # 2.2 FLOW MAP – ciaśniejsze kolumny
         flow_map = protocols.get("flow_map", {})
         if isinstance(flow_map, dict) and flow_map:
             subsection_title("2.2 Mapa przepływów (flow_map)")
@@ -230,16 +231,19 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                     counts = info.get("counts", {})
                     top_l7 = ", ".join(
                         f"{p}:{n}"
-                        for p, n in sorted(
-                            counts.items(), key=lambda x: -x[1]
-                        )
+                        for p, n in sorted(counts.items(), key=lambda x: -x[1])
                     ) or "-"
                     data.append(
                         [str(flow_key), str(l4), str(total), top_l7]
                     )
 
             if len(data) > 1:
-                t = Table(data, hAlign="LEFT", colWidths=[90 * mm, 15 * mm, 20 * mm, 60 * mm])
+                # węższy "Flow" i "Pakiety", więcej miejsca na kolumnę L7
+                t = Table(
+                    data,
+                    hAlign="LEFT",
+                    colWidths=[83 * mm, 12 * mm, 15 * mm, 60 * mm],
+                )
                 t.setStyle(
                     TableStyle(
                         [
@@ -271,7 +275,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         if public_ips:
             story.append(Paragraph("<b>Lista IP publicznych:</b>", body))
             items = [
-                ListItem(Paragraph(ip, small), bulletColor=colors.black)
+                ListItem(Paragraph(escape(ip), small), bulletColor=colors.black)
                 for ip in public_ips
             ]
             story.append(ListFlowable(items, bulletType="bullet"))
@@ -320,7 +324,11 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                         str(s.get("bytes_total")),
                     ]
                 )
-            t = Table(data, hAlign="LEFT", colWidths=[12 * mm, 14 * mm, 20 * mm, 45 * mm, 45 * mm, 18 * mm, 22 * mm])
+            t = Table(
+                data,
+                hAlign="LEFT",
+                colWidths=[12 * mm, 14 * mm, 20 * mm, 45 * mm, 45 * mm, 18 * mm, 22 * mm],
+            )
             t.setStyle(
                 TableStyle(
                     [
@@ -343,37 +351,49 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
     l7 = report_data.get("l7", {})
 
-    def render_l7_list(proto_name, items, fields):
+    def _soft_wrap_value(val, max_chunk=80):
+        """
+        Proste zawijanie: escapuje tekst i wstawia <br/> co max_chunk znaków.
+        Bez żadnych zero-width space'ów.
+        """
+        if val is None:
+            return ""
+        s = escape(str(val))
+        if len(s) <= max_chunk:
+            return s
+        chunks = [s[i : i + max_chunk] for i in range(0, len(s), max_chunk)]
+        return "<br/>".join(chunks)
+
+    def render_l7_records(proto_name, items, fields):
+        """
+        fields – lista (label, key).
+        Każdy rekord jest osobnym blokiem z nagłówkiem "Rekord N"
+        i polami łamanymi co max_chunk znaków.
+        """
         if not items:
             return
-        subsection_title(f"{proto_name}")
-        rows = []
-        header = [lbl for (lbl, _) in fields]
-        rows.append(header)
-        for it in items:
-            row = []
-            for _, key in fields:
-                row.append(str(it.get(key, "")))
-            rows.append(row)
-        t = Table(rows, hAlign="LEFT")
-        t.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ]
-            )
-        )
-        story.append(t)
-        story.append(Spacer(1, 8))
+
+        subsection_title(proto_name)
+
+        for idx, it in enumerate(items, start=1):
+            story.append(Paragraph(f"<b>Rekord {idx}</b>", small))
+
+            for label, key in fields:
+                value = it.get(key)
+                if value is None:
+                    continue
+
+                txt = _soft_wrap_value(value, max_chunk=64)
+                story.append(
+                    Paragraph(f"<b>{escape(str(label))}:</b> {txt}", small)
+                )
+
+            story.append(Spacer(1, 4))
 
     if isinstance(l7, dict):
         dns_items = l7.get("dns") or l7.get("DNS")
         if isinstance(dns_items, list):
-            render_l7_list(
+            render_l7_records(
                 "DNS",
                 dns_items,
                 [
@@ -388,7 +408,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         http_items = l7.get("http") or l7.get("HTTP")
         if isinstance(http_items, list):
-            render_l7_list(
+            render_l7_records(
                 "HTTP",
                 http_items,
                 [
@@ -399,12 +419,13 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                     ("uri", "uri"),
                     ("status", "status_code"),
                     ("ctype", "content_type"),
+                    ("clen", "content_length"),
                 ],
             )
 
         ftp_items = l7.get("ftp") or l7.get("FTP")
         if isinstance(ftp_items, list):
-            render_l7_list(
+            render_l7_records(
                 "FTP",
                 ftp_items,
                 [
@@ -418,7 +439,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         smtp_items = l7.get("smtp") or l7.get("SMTP")
         if isinstance(smtp_items, list):
-            render_l7_list(
+            render_l7_records(
                 "SMTP",
                 smtp_items,
                 [
@@ -433,7 +454,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         tls_items = l7.get("tls") or l7.get("TLS")
         if isinstance(tls_items, list):
-            render_l7_list(
+            render_l7_records(
                 "TLS",
                 tls_items,
                 [
@@ -455,21 +476,23 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
     else:
         for a in anomalies:
             proto = a.get("protocol", "N/A")
-            atype = a.get("type", "unknown")
+            atype = a.get("id", "unknown")
             sev = str(a.get("severity", "n/a")).upper()
             desc = a.get("description", "")
             details = a.get("details", {})
 
             story.append(
-                Paragraph(f"<b>[{sev}] {proto} / {atype}</b>", small)
+                Paragraph(f"<b>[{escape(sev)}] {escape(proto)} / {escape(atype)}</b>", small)
             )
             if desc:
-                story.append(Paragraph(desc, small))
+                story.append(Paragraph(escape(desc), small))
             if details:
                 for dk, dv in details.items():
-                    story.append(Paragraph(f"{dk}: {dv}", small))
+                    story.append(
+                        Paragraph(f"{escape(str(dk))}: {escape(str(dv))}", small)
+                    )
             story.append(Spacer(1, 4))
-
+            
     # ===================== 7. KORELACJE =====================
     section_title("7. Korelacje między protokołami")
 
@@ -486,13 +509,20 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             prots = corr.get("protocols", [])
             evidence = corr.get("evidence", {})
 
-            header = f"<b>[{sev}] {cid}</b> — protokoły: {', '.join(prots) if prots else 'N/A'}"
+            header = (
+                f"<b>[{escape(sev)}] {escape(cid)}</b> — protokoły: "
+                f"{escape(', '.join(prots) if prots else 'N/A')}"
+            )
             story.append(Paragraph(header, small))
             if desc:
-                story.append(Paragraph(desc, small))
+                story.append(Paragraph(escape(desc), small))
             if evidence:
                 for ek, ev in evidence.items():
-                    story.append(Paragraph(f"{ek}: {ev}", small))
+                    story.append(
+                        Paragraph(
+                            f"{escape(str(ek))}: {escape(str(ev))}", small
+                        )
+                    )
             story.append(Spacer(1, 4))
 
     # ===================== 8. WYEKSTRAHOWANE PLIKI =====================
@@ -508,34 +538,40 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         )
         story.append(Spacer(1, 4))
     else:
-        data = [["Nazwa", "Protokół", "Rozmiar [B]", "SHA256", "Ścieżka"]]
-        for f in extracted_files:
-            data.append(
-                [
-                    str(f.get("filename") or f.get("name") or ""),
-                    str(f.get("protocol", "UNKNOWN")),
-                    str(f.get("size", 0)),
-                    str(f.get("sha256", "")),
-                    str(f.get("full_path", "")),
-                ]
-            )
-        t = Table(data, hAlign="LEFT", colWidths=[35 * mm, 20 * mm, 22 * mm, 50 * mm, 60 * mm])
-        t.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ]
-            )
-        )
-        story.append(t)
-        story.append(Spacer(1, 8))
+        for idx, f in enumerate(extracted_files, start=1):
+            story.append(Paragraph(f"<b>Plik {idx}</b>", small))
 
-    # budujemy dokument
+            fname = f.get("filename") or f.get("name") or ""
+            proto = f.get("protocol", "UNKNOWN")
+            size = f.get("size", 0)
+            sha = f.get("sha256", "")
+            full = f.get("full_path", "")
+
+            story.append(
+                Paragraph(f"<b>Nazwa:</b> {escape(str(fname))}", small)
+            )
+            story.append(
+                Paragraph(f"<b>Protokół:</b> {escape(str(proto))}", small)
+            )
+            story.append(
+                Paragraph(f"<b>Rozmiar [B]:</b> {escape(str(size))}", small)
+            )
+            story.append(
+                Paragraph(
+                    f"<b>SHA256:</b> {_soft_wrap_value(sha, max_chunk=64)}",
+                    small,
+                )
+            )
+            story.append(
+                Paragraph(
+                    f"<b>Ścieżka:</b> {_soft_wrap_value(full, max_chunk=64)}",
+                    small,
+                )
+            )
+            story.append(Spacer(1, 6))
+
     doc.build(story)
+
 
 def generate_final_report(report_data, base_output_dir="reports", extracted_dir=None):
     _ensure_dir(base_output_dir)
