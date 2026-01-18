@@ -4,8 +4,20 @@ from datetime import datetime
 from getpass import getpass
 from textwrap import wrap
 
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+    ListFlowable,
+    ListItem,
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib import pdfencrypt
 
@@ -62,199 +74,189 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         canPrint=1,
         canModify=0,
         canCopy=0,
-        canAnnotate=0
+        canAnnotate=0,
     )
 
-    c = canvas.Canvas(pdf_path, pagesize=A4, encrypt=enc)
-    w, h = A4
-
-    # Marginesy i parametry tekstu
-    MARGIN_LEFT = 20 * mm
-    MARGIN_RIGHT = 20 * mm
-    MARGIN_TOP = 20 * mm
-    MARGIN_BOTTOM = 20 * mm
-    LINE_HEIGHT = 5 * mm
-
-    # domyślna czcionka „body”
-    DEFAULT_FONT_NAME = "Helvetica"
-    DEFAULT_FONT_SIZE = 10
-    DEFAULT_MAX_CHARS = 90  # trzymamy się tego wszędzie, żeby nie wychodzić poza prawy margines
-
-    y = h - MARGIN_TOP
-
-    def set_body_font():
-        c.setFont(DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE)
-
-    def new_page():
-        nonlocal y
-        c.showPage()
-        y = h - MARGIN_TOP
-        set_body_font()  # <–– po nowej stronie zawsze wracamy do body font
-
-    def ensure_space(lines=1):
-        nonlocal y
-        if y - lines * LINE_HEIGHT < MARGIN_BOTTOM:
-            new_page()
-
-    def draw_wrapped(text, x, max_chars=DEFAULT_MAX_CHARS, bullet=None):
-        """
-        Proste zawijanie tekstu po liczbie znaków.
-        max_chars ustawione tak, żeby zmieścić się między MARGIN_LEFT a MARGIN_RIGHT.
-        """
-        nonlocal y
-        if text is None:
-            return
-        text = str(text)
-        if not text:
-            return
-
-        # pilnujemy, żeby max_chars nigdy nie był większy od "bezpiecznego"
-        max_chars = min(max_chars, DEFAULT_MAX_CHARS)
-
-        lines = wrap(text, max_chars)
-        for i, line in enumerate(lines):
-            ensure_space()
-            if bullet and i == 0:
-                c.drawString(x, y, f"{bullet} {line}")
-            else:
-                prefix = "  " if bullet and i > 0 else ""
-                c.drawString(x, y, prefix + line)
-            y -= LINE_HEIGHT
-
-    def section_title(title, level=1):
-        nonlocal y
-        ensure_space(2)
-        if level == 1:
-            c.setFont("Helvetica-Bold", 14)
-        else:
-            c.setFont("Helvetica-Bold", 12)
-        c.drawString(MARGIN_LEFT, y, title)
-        y -= LINE_HEIGHT * 1.2
-        if level == 1:
-            c.setLineWidth(1)
-            c.line(
-                MARGIN_LEFT,
-                y + LINE_HEIGHT * 0.4,
-                w - MARGIN_RIGHT,
-                y + LINE_HEIGHT * 0.4
-            )
-            y -= LINE_HEIGHT * 0.5
-        # po tytule wracamy do body font
-        set_body_font()
-
-    def kv(label, value, max_chars=DEFAULT_MAX_CHARS):
-        nonlocal y
-        ensure_space()
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(MARGIN_LEFT, y, f"{label}:")
-        y -= LINE_HEIGHT
-        set_body_font()
-        draw_wrapped(value, MARGIN_LEFT + 10 * mm, max_chars=max_chars)
-        y -= LINE_HEIGHT * 0.3
-
-    # ========= STRONA TYTUŁOWA =========
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(MARGIN_LEFT, y, "PCAP Forensic Analyzer — Raport końcowy")
-    y -= LINE_HEIGHT * 2
-
-    c.setFont("Helvetica", 11)
-    draw_wrapped(f"Osoba odpowiedzialna za raport: {responsible_person}", MARGIN_LEFT)
-    draw_wrapped(
-        "Data wygenerowania: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        MARGIN_LEFT
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+        encrypt=enc,
     )
-    y -= LINE_HEIGHT
-    set_body_font()
 
-    # ========= 1. METADANE I INFORMACJE O PLIKU =========
-    section_title("1. Metadane i informacje o pliku", level=1)
+    styles = getSampleStyleSheet()
+    # bazowy tekst
+    body = styles["Normal"]
+    body.fontName = "Helvetica"
+    body.fontSize = 10
+    body.leading = 12
+
+    small = ParagraphStyle(
+        name="Small",
+        parent=body,
+        fontSize=9,
+        leading=11,
+    )
+
+    h1 = ParagraphStyle(
+        name="SectionTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        spaceBefore=12,
+        spaceAfter=6,
+    )
+
+    h2 = ParagraphStyle(
+        name="SubSectionTitle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        spaceBefore=8,
+        spaceAfter=4,
+    )
+
+    story = []
+
+    def section_title(text):
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(text, h1))
+        story.append(Spacer(1, 4))
+
+    def subsection_title(text):
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(text, h2))
+        story.append(Spacer(1, 2))
+
+    def kv(label, value, style=body):
+        val = "-" if value is None else str(value)
+        story.append(Paragraph(f"<b>{label}:</b> {val}", style))
+        story.append(Spacer(1, 2))
+
+    # ===================== STRONA TYTUŁOWA =====================
+    story.append(Paragraph("PCAP Forensic Analyzer — Raport końcowy", styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    story.append(
+        Paragraph(
+            f"Osoba odpowiedzialna za raport: {responsible_person or '-'}",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "Data wygenerowania: "
+            + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            body,
+        )
+    )
+    story.append(Spacer(1, 12))
+
+    # ===================== 1. METADANE =====================
+    section_title("1. Metadane i informacje o pliku")
 
     metadata = report_data.get("metadata", {})
     if metadata:
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(MARGIN_LEFT, y, "1.1 Metadane źródła")
-        y -= LINE_HEIGHT * 1.2
-        set_body_font()
-
-        kv("Źródło", metadata.get("source", "N/A"))
-        kv("Ścieżka pliku", metadata.get("file_path", "N/A"))
-        kv("SHA256 (źródło)", metadata.get("sha256", "N/A"))
-        y -= LINE_HEIGHT * 0.5
+        subsection_title("1.1 Metadane źródła")
+        kv("Źródło", metadata.get("source"))
+        kv("Ścieżka pliku", metadata.get("file_path"))
+        kv("SHA256 (źródło)", metadata.get("sha256"))
 
     file_info = report_data.get("file_info", {})
     if file_info:
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(MARGIN_LEFT, y, "1.2 Informacje o pliku PCAP")
-        y -= LINE_HEIGHT * 1.2
-        set_body_font()
+        subsection_title("1.2 Informacje o pliku PCAP")
+        kv("Plik", file_info.get("file"))
+        kv("Rozmiar [bajtów]", file_info.get("size"))
+        kv("SHA256", file_info.get("hash"))
+        kv("Liczba pakietów", file_info.get("packet_count"))
+        kv("Pierwszy znacznik czasowy", file_info.get("first_timestamp"))
+        kv("Ostatni znacznik czasowy", file_info.get("last_timestamp"))
 
-        kv("Plik", file_info.get("file", "N/A"))
-        kv("Rozmiar [bajtów]", file_info.get("size", "N/A"))
-        kv("SHA256", file_info.get("hash", "N/A"))
-        kv("Liczba pakietów", file_info.get("packet_count", "N/A"))
-        kv("Pierwszy znacznik czasowy", file_info.get("first_timestamp", "N/A"))
-        kv("Ostatni znacznik czasowy", file_info.get("last_timestamp", "N/A"))
-
-    # ========= 2. PROTOKOŁY I FLOW_MAP =========
-    section_title("2. Protokoły i statystyki", level=1)
+    # ===================== 2. PROTOKOŁY =====================
+    section_title("2. Protokoły i statystyki")
 
     protocols = report_data.get("protocols", {})
     if protocols:
         detected = protocols.get("detected", [])
         per_proto = protocols.get("per_protocol", {})
         confidence = protocols.get("confidence", {})
-        flow_map = protocols.get("flow_map", {})
         total_packets = protocols.get("total_packets", None)
 
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(MARGIN_LEFT, y, "2.1 Zestawienie protokołów L7")
-        y -= LINE_HEIGHT * 1.2
-        set_body_font()
+        subsection_title("2.1 Zestawienie protokołów L7")
 
         if total_packets is not None:
             kv("Łączna liczba pakietów", total_packets)
 
         if detected:
-            kv("Wykryte protokoły", ", ".join(detected))
+            kv("Wykryte protokoły", ", ".join(sorted(detected)))
 
         if per_proto:
-            ensure_space(2)
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(MARGIN_LEFT, y, "Statystyki per protokół:")
-            y -= LINE_HEIGHT * 1.2
-            set_body_font()
+            data = [["Protokół", "Pakiety", "Pewność"]]
+            for proto in sorted(per_proto.keys()):
+                cnt = per_proto.get(proto, 0)
+                conf = confidence.get(proto, 0.0)
+                data.append([proto, str(cnt), f"{conf:.2f}"])
 
-            for proto_name in sorted(per_proto.keys()):
-                cnt = per_proto.get(proto_name, 0)
-                conf = confidence.get(proto_name, 0.0)
-                line = f"- {proto_name}: pakiety={cnt}, pewność={conf:.2f}"
-                draw_wrapped(line, MARGIN_LEFT + 5 * mm, bullet=None)
+            t = Table(data, hAlign="LEFT")
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+                    ]
+                )
+            )
+            story.append(t)
+            story.append(Spacer(1, 8))
 
-        if flow_map:
-            ensure_space(2)
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(MARGIN_LEFT, y, "2.2 Mapa przepływów (flow_map)")
-            y -= LINE_HEIGHT * 1.2
-            set_body_font()
+        # flow_map jako tabela (jeżeli jest w takim formacie, jak zakładaliśmy)
+        flow_map = protocols.get("flow_map", {})
+        if isinstance(flow_map, dict) and flow_map:
+            subsection_title("2.2 Mapa przepływów (flow_map)")
 
-            ensure_space()
-            c.setFont("Helvetica-Bold", 9)
-            c.drawString(MARGIN_LEFT, y, "Flow key / L4 / total / top L7")
-            y -= LINE_HEIGHT
-            set_body_font()
-
+            data = [["Flow", "L4", "Pakiety", "Najczęstsze L7"]]
             for flow_key, info in flow_map.items():
-                l4 = info.get("l4", "N/A")
-                total = info.get("total", 0)
-                counts = info.get("counts", {})
-                top_l7 = ", ".join(
-                    f"{p}:{n}" for p, n in sorted(counts.items(), key=lambda x: -x[1])
-                ) or "-"
-                line = f"- {flow_key} | {l4} | pakiety={total} | L7={top_l7}"
-                draw_wrapped(line, MARGIN_LEFT + 5 * mm)
+                if isinstance(info, dict):
+                    l4 = info.get("l4", "N/A")
+                    total = info.get("total", 0)
+                    counts = info.get("counts", {})
+                    top_l7 = ", ".join(
+                        f"{p}:{n}"
+                        for p, n in sorted(
+                            counts.items(), key=lambda x: -x[1]
+                        )
+                    ) or "-"
+                    data.append(
+                        [str(flow_key), str(l4), str(total), top_l7]
+                    )
 
-    # ========= 3. ANALIZA ADRESÓW IP =========
-    section_title("3. Analiza adresów IP", level=1)
+            if len(data) > 1:
+                t = Table(data, hAlign="LEFT", colWidths=[90 * mm, 15 * mm, 20 * mm, 60 * mm])
+                t.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                            ("FONTSIZE", (0, 0), (-1, -1), 8),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                story.append(t)
+                story.append(Spacer(1, 8))
+
+    # ===================== 3. IP ANALYSIS =====================
+    section_title("3. Analiza adresów IP")
 
     ip_analysis = report_data.get("ip_analysis", {})
     if ip_analysis:
@@ -262,42 +264,40 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
         private_ips = ip_analysis.get("private_ips", [])
         country_stats = ip_analysis.get("country_stats", {})
 
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(MARGIN_LEFT, y, "3.1 Podsumowanie adresów")
-        y -= LINE_HEIGHT * 1.2
-        set_body_font()
-
-        kv("Liczba unikalnych IP publicznych", len(public_ips))
-        if private_ips:
-            kv("Liczba unikalnych IP prywatnych", len(private_ips))
+        subsection_title("3.1 Podsumowanie adresów")
+        kv("Unikalne IP publiczne", len(public_ips))
+        kv("Unikalne IP prywatne", len(private_ips))
 
         if public_ips:
-            ensure_space()
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(MARGIN_LEFT, y, "Lista IP publicznych:")
-            y -= LINE_HEIGHT * 1.1
-            set_body_font()
-
-            c.setFont("Helvetica", 9)
-            for ip in public_ips:
-                draw_wrapped(ip, MARGIN_LEFT + 5 * mm, bullet="-")
-            set_body_font()
+            story.append(Paragraph("<b>Lista IP publicznych:</b>", body))
+            items = [
+                ListItem(Paragraph(ip, small), bulletColor=colors.black)
+                for ip in public_ips
+            ]
+            story.append(ListFlowable(items, bulletType="bullet"))
+            story.append(Spacer(1, 6))
 
         if country_stats:
-            ensure_space(2)
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(MARGIN_LEFT, y, "3.2 Ruch wg krajów (country_stats)")
-            y -= LINE_HEIGHT * 1.2
-            set_body_font()
-
-            c.setFont("Helvetica", 9)
+            subsection_title("3.2 Ruch wg krajów")
+            data = [["Kraj", "Pakiety"]]
             for country, count in sorted(country_stats.items(), key=lambda x: -x[1]):
-                line = f"{country}: {count} pakietów"
-                draw_wrapped(line, MARGIN_LEFT + 5 * mm, bullet="-")
-            set_body_font()
+                data.append([country, str(count)])
+            t = Table(data, hAlign="LEFT")
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ]
+                )
+            )
+            story.append(t)
+            story.append(Spacer(1, 8))
 
-    # ========= 4. SESJE TCP/UDP =========
-    section_title("4. Sesje TCP/UDP", level=1)
+    # ===================== 4. SESJE =====================
+    section_title("4. Sesje TCP/UDP")
 
     sessions_data = report_data.get("sessions", {})
     if sessions_data and sessions_data.get("success", False):
@@ -306,63 +306,74 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         kv("Łączna liczba sesji", total_sessions)
 
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(MARGIN_LEFT, y, "Lista sesji:")
-        y -= LINE_HEIGHT * 1.2
-        set_body_font()
+        if sessions:
+            data = [["ID", "Proto", "Kierunek", "Źródło", "Cel", "Pakiety", "Bajty"]]
+            for s in sessions:
+                data.append(
+                    [
+                        str(s.get("id")),
+                        str(s.get("protocol")),
+                        str(s.get("direction", "UNKNOWN")),
+                        f"{s.get('src_ip')}:{s.get('src_port')}",
+                        f"{s.get('dst_ip')}:{s.get('dst_port')}",
+                        str(s.get("packet_count")),
+                        str(s.get("bytes_total")),
+                    ]
+                )
+            t = Table(data, hAlign="LEFT", colWidths=[12 * mm, 14 * mm, 20 * mm, 45 * mm, 45 * mm, 18 * mm, 22 * mm])
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 8),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]
+                )
+            )
+            story.append(t)
+            story.append(Spacer(1, 8))
+    else:
+        story.append(Paragraph("Brak informacji o sesjach.", body))
+        story.append(Spacer(1, 4))
 
-        c.setFont("Helvetica", 9)
-        for s in sessions:
-            ensure_space(3)
-            sid = s.get("id")
-            proto = s.get("protocol")
-            src_ip = s.get("src_ip")
-            src_port = s.get("src_port")
-            dst_ip = s.get("dst_ip")
-            dst_port = s.get("dst_port")
-            pkt_count = s.get("packet_count")
-            bytes_total = s.get("bytes_total")
-            direction = s.get("direction", "UNKNOWN")
-
-            line1 = f"Sesja ID {sid} | {proto} | {src_ip}:{src_port} -> {dst_ip}:{dst_port} | kierunek={direction}"
-            line2 = f"Pakiety={pkt_count}, bajty={bytes_total}"
-
-            draw_wrapped(line1, MARGIN_LEFT + 5 * mm, bullet="-")
-            draw_wrapped(line2, MARGIN_LEFT + 10 * mm)
-        set_body_font()
-
-    # ========= 5. DANE L7 =========
-    section_title("5. Dane warstwy aplikacji (L7)", level=1)
+    # ===================== 5. L7 DATA =====================
+    section_title("5. Dane warstwy aplikacji (L7)")
 
     l7 = report_data.get("l7", {})
 
-    def _render_l7_list(proto_name, items, fields):
-        nonlocal y
+    def render_l7_list(proto_name, items, fields):
         if not items:
             return
-        ensure_space(2)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(MARGIN_LEFT, y, f"{proto_name}")
-        y -= LINE_HEIGHT * 1.2
-        c.setFont("Helvetica", 9)
-
+        subsection_title(f"{proto_name}")
+        rows = []
+        header = [lbl for (lbl, _) in fields]
+        rows.append(header)
         for it in items:
-            ensure_space()
-            parts = []
-            for label, key in fields:
-                val = it.get(key)
-                if val is not None:
-                    parts.append(f"{label}={val}")
-            if not parts:
-                continue
-            line = ", ".join(parts)
-            draw_wrapped(line, MARGIN_LEFT + 5 * mm)
-        set_body_font()
+            row = []
+            for _, key in fields:
+                row.append(str(it.get(key, "")))
+            rows.append(row)
+        t = Table(rows, hAlign="LEFT")
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 8))
 
     if isinstance(l7, dict):
         dns_items = l7.get("dns") or l7.get("DNS")
         if isinstance(dns_items, list):
-            _render_l7_list(
+            render_l7_list(
                 "DNS",
                 dns_items,
                 [
@@ -377,7 +388,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         http_items = l7.get("http") or l7.get("HTTP")
         if isinstance(http_items, list):
-            _render_l7_list(
+            render_l7_list(
                 "HTTP",
                 http_items,
                 [
@@ -388,13 +399,12 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                     ("uri", "uri"),
                     ("status", "status_code"),
                     ("ctype", "content_type"),
-                    ("clen", "content_length"),
                 ],
             )
 
         ftp_items = l7.get("ftp") or l7.get("FTP")
         if isinstance(ftp_items, list):
-            _render_l7_list(
+            render_l7_list(
                 "FTP",
                 ftp_items,
                 [
@@ -408,7 +418,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         smtp_items = l7.get("smtp") or l7.get("SMTP")
         if isinstance(smtp_items, list):
-            _render_l7_list(
+            render_l7_list(
                 "SMTP",
                 smtp_items,
                 [
@@ -423,7 +433,7 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
 
         tls_items = l7.get("tls") or l7.get("TLS")
         if isinstance(tls_items, list):
-            _render_l7_list(
+            render_l7_list(
                 "TLS",
                 tls_items,
                 [
@@ -435,14 +445,13 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
                 ],
             )
 
-    # ========= 6. ANOMALIE =========
-    section_title("6. Wykryte anomalie", level=1)
+    # ===================== 6. ANOMALIE =====================
+    section_title("6. Wykryte anomalie")
 
     anomalies = report_data.get("anomalies", [])
-    set_body_font()
-
     if not anomalies:
-        draw_wrapped("Brak wykrytych anomalii.", MARGIN_LEFT + 5 * mm)
+        story.append(Paragraph("Brak wykrytych anomalii.", body))
+        story.append(Spacer(1, 4))
     else:
         for a in anomalies:
             proto = a.get("protocol", "N/A")
@@ -451,89 +460,82 @@ def _pdf_report(report_data, pdf_path, password, responsible_person):
             desc = a.get("description", "")
             details = a.get("details", {})
 
-            ensure_space(3)
-            c.setFont("Helvetica-Bold", 10)
-            title = f"[{sev}] {proto} / {atype}"
-            draw_wrapped(title, MARGIN_LEFT + 5 * mm, bullet="-")
-
-            c.setFont("Helvetica", 9)
+            story.append(
+                Paragraph(f"<b>[{sev}] {proto} / {atype}</b>", small)
+            )
             if desc:
-                draw_wrapped(desc, MARGIN_LEFT + 10 * mm)
+                story.append(Paragraph(desc, small))
             if details:
                 for dk, dv in details.items():
-                    line = f"{dk}: {dv}"
-                    draw_wrapped(line, MARGIN_LEFT + 10 * mm)
-            set_body_font()
+                    story.append(Paragraph(f"{dk}: {dv}", small))
+            story.append(Spacer(1, 4))
 
-    # ========= 7. KORELACJE =========
-    section_title("7. Korelacje między protokołami", level=1)
+    # ===================== 7. KORELACJE =====================
+    section_title("7. Korelacje między protokołami")
 
     correlations = report_data.get("correlations", [])
-    set_body_font()
-
     if not correlations:
-        draw_wrapped(
-            "Brak znalezionych korelacji między protokołami.",
-            MARGIN_LEFT + 5 * mm,
+        story.append(
+            Paragraph("Brak znalezionych korelacji między protokołami.", body)
         )
     else:
         for corr in correlations:
-            ensure_space(3)
             cid = corr.get("id", "N/A")
             sev = str(corr.get("severity", "n/a")).upper()
             desc = corr.get("description", "")
             prots = corr.get("protocols", [])
             evidence = corr.get("evidence", {})
 
-            c.setFont("Helvetica-Bold", 10)
-            header = f"[{sev}] {cid} / protokoły: {', '.join(prots) if prots else 'N/A'}"
-            draw_wrapped(header, MARGIN_LEFT + 5 * mm, bullet="-")
-
-            c.setFont("Helvetica", 9)
+            header = f"<b>[{sev}] {cid}</b> — protokoły: {', '.join(prots) if prots else 'N/A'}"
+            story.append(Paragraph(header, small))
             if desc:
-                draw_wrapped(desc, MARGIN_LEFT + 10 * mm)
-
+                story.append(Paragraph(desc, small))
             if evidence:
                 for ek, ev in evidence.items():
-                    line = f"{ek}: {ev}"
-                    draw_wrapped(line, MARGIN_LEFT + 10 * mm)
-            set_body_font()
+                    story.append(Paragraph(f"{ek}: {ev}", small))
+            story.append(Spacer(1, 4))
 
-    # ========= 8. WYEKSTRAHOWANE PLIKI =========
-    section_title("8. Wyekstrahowane pliki", level=1)
+    # ===================== 8. WYEKSTRAHOWANE PLIKI =====================
+    section_title("8. Wyekstrahowane pliki")
 
     extracted_files = report_data.get("extracted_files", [])
-    set_body_font()
-
     if not extracted_files:
-        draw_wrapped(
-            "Brak wyekstrahowanych plików z protokołów aplikacyjnych.",
-            MARGIN_LEFT + 5 * mm,
-        )
-    else:
-        for f in extracted_files:
-            ensure_space(4)
-            fname = f.get("filename") or f.get("name")
-            full = f.get("full_path", "")
-            size = f.get("size", 0)
-            sha = f.get("sha256", "")
-            proto = f.get("protocol", "UNKNOWN")
-
-            c.setFont("Helvetica-Bold", 10)
-            draw_wrapped(
-                f"- {fname} (protokół: {proto})",
-                MARGIN_LEFT + 5 * mm,
+        story.append(
+            Paragraph(
+                "Brak wyekstrahowanych plików z protokołów aplikacyjnych.",
+                body,
             )
-            c.setFont("Helvetica", 9)
-            if full:
-                draw_wrapped(f"Ścieżka: {full}", MARGIN_LEFT + 10 * mm)
-            draw_wrapped(f"Rozmiar: {size} bajtów", MARGIN_LEFT + 10 * mm)
-            if sha:
-                draw_wrapped(f"SHA256: {sha}", MARGIN_LEFT + 10 * mm)
-            set_body_font()
+        )
+        story.append(Spacer(1, 4))
+    else:
+        data = [["Nazwa", "Protokół", "Rozmiar [B]", "SHA256", "Ścieżka"]]
+        for f in extracted_files:
+            data.append(
+                [
+                    str(f.get("filename") or f.get("name") or ""),
+                    str(f.get("protocol", "UNKNOWN")),
+                    str(f.get("size", 0)),
+                    str(f.get("sha256", "")),
+                    str(f.get("full_path", "")),
+                ]
+            )
+        t = Table(data, hAlign="LEFT", colWidths=[35 * mm, 20 * mm, 22 * mm, 50 * mm, 60 * mm])
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 8))
 
-    c.showPage()
-    c.save()
+    # budujemy dokument
+    doc.build(story)
 
 def generate_final_report(report_data, base_output_dir="reports", extracted_dir=None):
     _ensure_dir(base_output_dir)
