@@ -20,7 +20,7 @@ class ForensicApp:
             print("==========================================")
             print("ŹRÓDŁA DANYCH:")
             print("[1] Wczytaj PCAP z dysku")
-            print("[2] Przechwytywanie transmisji live")
+            print("[2] Przechwytywanie transmisji live (wymaga sudo)")
             print("[3] Pobierz PCAP z maszyny zdalnej (SCP)")
             print("[4] Odbierz PCAP przez sieć (Netcat)")
             print("[5] Pobierz PCAP z URL")
